@@ -1,0 +1,7 @@
+streamlit
+supabase
+cloudinary
+Pillow
+torch
+transformers
+python-dotenv
