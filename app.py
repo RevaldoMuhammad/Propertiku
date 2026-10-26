@@ -8,6 +8,64 @@ from PIL import Image
 from transformers import CLIPProcessor, CLIPModel
 from dotenv import load_dotenv
 
+# --- KONFIGURASI HALAMAN ---
+st.set_page_config(page_title="Sistem Pencarian Listing Properti", page_icon="🏠")
+
+# --- KODE CSS KUSTOM UNTUK MEMPERCANTIK TAMPILAN PROPERTIKU ---
+st.markdown("""
+<style>
+    /* 1. Desain Tombol Utama (Warna Khas: Oranye Senja) */
+    .stButton>button {
+        background-color: #E67E22; /* Oranye lembut */
+        color: white;
+        border-radius: 8px; /* Sudut melengkung yang modern */
+        border: none;
+        padding: 10px 24px;
+        font-weight: 600;
+        transition: all 0.3s ease; /* Animasi halus saat disentuh */
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    /* Efek saat tombol disentuh/di-hover */
+    .stButton>button:hover {
+        background-color: #D35400; /* Oranye sedikit lebih gelap */
+        transform: translateY(-2px); /* Tombol seolah terangkat */
+        box-shadow: 0 6px 12px rgba(0,0,0,0.15);
+        color: white;
+    }
+    
+    /* 2. Desain Kotak Input (Formulir yang lebih ramah mata) */
+    .stTextInput>div>div>input, .stTextArea>div>div>textarea {
+        border-radius: 8px;
+        border: 1px solid #BDC3C7;
+        padding: 10px;
+        transition: all 0.3s;
+    }
+    /* Efek menyala oranye saat sedang mengetik */
+    .stTextInput>div>div>input:focus, .stTextArea>div>div>textarea:focus {
+        border-color: #E67E22;
+        box-shadow: 0 0 5px rgba(230, 126, 34, 0.4);
+    }
+
+    /* 3. Desain Kartu Katalog (Expander) agar rapi */
+    div[data-testid="stExpander"] {
+        border-radius: 12px;
+        border: 1px solid rgba(149, 165, 166, 0.3);
+        box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        overflow: hidden;
+        background-color: rgba(255, 255, 255, 0.02); /* Transparan agar cocok di mode gelap/terang */
+    }
+
+    /* 4. Tampilan Tab yang lebih elegan */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 10px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        border-radius: 8px 8px 0px 0px;
+        padding: 10px 20px;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 # 1. Mengambil kunci akses dari file .env
 load_dotenv()
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
@@ -24,8 +82,7 @@ cloudinary.config(
     api_secret=CLOUDINARY_API_SECRET
 )
 
-# 3. Menyiapkan Model AI (CLIP) untuk membaca gambar
-# St.cache_resource digunakan agar AI tidak dimuat ulang setiap kali tombol ditekan
+# 3. Menyiapkan Model AI (CLIP)
 @st.cache_resource
 def load_ai_model():
     model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
@@ -39,17 +96,51 @@ def get_image_vector(image):
     inputs = processor(images=image, return_tensors="pt")
     with torch.no_grad():
         image_features = model.get_image_features(**inputs)
-
-    # Mengubah format angka agar bisa disimpan di Supabase
     vector = image_features[0].numpy().tolist()
     return vector
 
-# --- TAMPILAN APLIKASI (STREAMLIT) ---
-st.set_page_config(page_title="Sistem Pencarian Listing Properti", page_icon="🏠")
+# ==========================================
+# 4. SISTEM LOGIN & OTENTIKASI
+# ==========================================
+if 'user' not in st.session_state:
+    st.title("🔐 Gerbang Katalog Properti")
+    
+    opsi = st.radio("Pilih akses:", ["Login", "Daftar Agen Baru"])
+    email = st.text_input("Email")
+    password = st.text_input("Password", type="password")
+    submit_login = st.button("Eksekusi")
+    
+    if submit_login:
+        if opsi == "Daftar Agen Baru":
+            try:
+                res = supabase.auth.sign_up({"email": email, "password": password})
+                st.success("Akun berhasil dibuat! Silakan pilih opsi 'Login' untuk masuk.")
+            except Exception as e:
+                st.error(f"Gagal mendaftar: {e}")
+        else:
+            try:
+                res = supabase.auth.sign_in_with_password({"email": email, "password": password})
+                st.session_state['user'] = res.user
+                st.rerun()
+            except Exception as e:
+                st.error("Login gagal. Periksa kembali email dan password Anda.")
+    
+    st.stop() # Hentikan kode di bawah ini jika belum login
+
+# ==========================================
+# 5. TAMPILAN UTAMA APLIKASI
+# ==========================================
+# Sidebar untuk info agen
+st.sidebar.write(f"Masuk sebagai: **{st.session_state['user'].email}**")
+if st.sidebar.button("Logout"):
+    supabase.auth.sign_out()
+    st.session_state.pop('user', None)
+    st.rerun()
+
 st.title("🏠 Manajemen Listing Properti AI")
 
-# Membuat menu dengan tab
-tab1, tab2, tab3 = st.tabs(["Tambah Listing Baru", "Cari dengan Foto (AI)", "Cari dengan Teks"])
+# Membuat menu dengan 4 tab (Tambahan Katalog)
+tab1, tab2, tab3, tab4 = st.tabs(["➕ Tambah Listing", "🔍 Cari Foto (AI)", "🔍 Cari Teks", "📋 Katalog Saya"])
 
 # --- TAB 1: TAMBAH LISTING ---
 with tab1:
@@ -58,21 +149,25 @@ with tab1:
         owner_name = st.text_input("Nama Pemilik (Contoh: Bapak Budi)")
         owner_phone = st.text_input("Nomor HP Pemilik")
         description = st.text_area("Deskripsi Singkat (Alamat, Harga, Fasilitas)")
-        uploaded_images = st.file_uploader("Pilih Foto Rumah (Bisa lebih dari satu)", type=['jpg', 'jpeg', 'png'], accept_multiple_files=True)
+        # Info kapasitas maksimal diubah menjadi 30
+        uploaded_images = st.file_uploader("Pilih Foto Rumah (Maksimal 30 foto)", type=['jpg', 'jpeg', 'png'], accept_multiple_files=True)
 
         submit_button = st.form_submit_button("Simpan Properti")
 
         if submit_button:
             if not owner_name or not uploaded_images:
                 st.error("Nama pemilik dan minimal 1 foto wajib diisi!")
+            elif len(uploaded_images) > 30:
+                st.error("Maksimal unggah adalah 30 foto sekaligus. Silakan kurangi foto Anda.")
             else:
                 with st.spinner('Sedang mengunggah dan memproses AI...'):
                     try:
-                        # 1. Simpan data teks ke Supabase terlebih dahulu
+                        # 1. Simpan data teks + ID Agen (user_id) ke Supabase
                         prop_data = {
                             "owner_name": owner_name,
                             "owner_phone": owner_phone,
-                            "description": description
+                            "description": description,
+                            "user_id": st.session_state['user'].id # LABEL KEPEMILIKAN
                         }
                         prop_res = supabase.table("properties").insert(prop_data).execute()
                         property_id = prop_res.data[0]['id']
@@ -80,28 +175,23 @@ with tab1:
                         # 2. Proses dan unggah setiap foto
                         for img_file in uploaded_images:
                             img = Image.open(img_file).convert('RGB')
+                            img_file.seek(0) 
 
-                            img_file.seek(0) # <--- TAMBAHKAN BARIS INI
-
-                            # A. Unggah foto asli ke Cloudinary untuk mendapatkan link
+                            # A. Unggah ke Cloudinary
                             upload_result = cloudinary.uploader.upload(img_file)
                             image_url = upload_result['secure_url']
 
-                            # B. Minta AI mengubah foto menjadi vektor
+                            # B. Vektor AI
                             vektor_mentah = get_image_vector(img)
-                            
-                            # --- BARIS PERBAIKAN ---
-                            # Kita bongkar lapisan kurung sikunya agar jadi 1 dimensi (1D)
                             if isinstance(vektor_mentah[0], list):
                                 if isinstance(vektor_mentah[0][0], list):
-                                    img_vector = vektor_mentah[0][0] # Jika berlapis 3 (3D)
+                                    img_vector = vektor_mentah[0][0]
                                 else:
-                                    img_vector = vektor_mentah[0]    # Jika berlapis 2 (2D)
+                                    img_vector = vektor_mentah[0]
                             else:
-                                img_vector = vektor_mentah           # Jika sudah benar 1D
-                            # -----------------------
+                                img_vector = vektor_mentah
 
-                            # C. Simpan link foto dan vektor ke Supabase
+                            # C. Simpan ke Supabase
                             img_data = {
                                 "property_id": property_id,
                                 "image_url": image_url,
@@ -113,7 +203,7 @@ with tab1:
                     except Exception as e:
                         st.error(f"Terjadi kesalahan: {e}")
 
-# --- TAB 2: PENCARIAN DENGAN FOTO (REVERSE IMAGE SEARCH) ---
+# --- TAB 2: PENCARIAN FOTO ---
 with tab2:
     st.header("Cari Listing Menggunakan Foto")
     search_image = st.file_uploader("Unggah foto rumah dari pembeli", type=['jpg', 'jpeg', 'png'])
@@ -124,10 +214,7 @@ with tab2:
 
         if st.button("Mulai Pencarian AI"):
             with st.spinner('AI sedang mencocokkan kemiripan...'):
-                # 1. Ubah foto pencarian menjadi vektor
                 vektor_mentah = get_image_vector(img_to_search)
-
-                # Ratakan kurung siku menjadi 1 dimensi
                 if isinstance(vektor_mentah[0], list):
                     if isinstance(vektor_mentah[0][0], list):
                         query_vector = vektor_mentah[0][0] 
@@ -136,11 +223,7 @@ with tab2:
                 else:
                     query_vector = vektor_mentah
 
-                # 2. Cari di database (menggunakan fitur bawaan pgvector: <-> untuk kemiripan kosinus)
-                # Kita urutkan dari yang jarak vektornya paling kecil (paling mirip)
                 try:
-                    # Ini menggunakan perintah RPC (Remote Procedure Call). 
-                    # Kita akan membuat fungsinya sebentar lagi di Supabase.
                     response = supabase.rpc(
                         'match_images', 
                         {'query_embedding': query_vector, 'match_threshold': 0.7, 'match_count': 3}
@@ -161,17 +244,15 @@ with tab2:
                     else:
                         st.warning("Tidak ada rumah yang mirip di database.")
                 except Exception as e:
-                     st.error(f"Anda perlu menjalankan kode SQL Fungsi Pencarian (RPC) di Supabase. Lihat panduan selanjutnya.")
+                     st.error(f"Error pencarian: {e}")
 
-
-# --- TAB 3: PENCARIAN TEKS BIASA ---
+# --- TAB 3: PENCARIAN TEKS ---
 with tab3:
     st.header("Cari Berdasarkan Teks")
     search_query = st.text_input("Ketik nama pemilik, no HP, atau deskripsi (Cth: Budi, 0812, Jakarta)")
 
     if st.button("Cari Listing"):
         if search_query:
-            # Menggunakan fungsi 'ilike' (case-insensitive) untuk mencari di 3 kolom sekaligus
             res = supabase.table("properties").select("*").or_(
                 f"owner_name.ilike.%{search_query}%,owner_phone.ilike.%{search_query}%,description.ilike.%{search_query}%"
             ).execute()
@@ -184,3 +265,27 @@ with tab3:
                     st.divider()
             else:
                 st.info("Listing tidak ditemukan.")
+
+# --- TAB 4: KATALOG & HAPUS LISTING ---
+with tab4:
+    st.header("Katalog Properti Anda")
+    # Hanya menarik data properti milik agen yang sedang login
+    res_katalog = supabase.table("properties").select("*").eq("user_id", st.session_state['user'].id).execute()
+    
+    if res_katalog.data:
+        for prop in res_katalog.data:
+            with st.expander(f"🏠 {prop['owner_name']} - {prop['owner_phone']}"):
+                st.write(f"**Deskripsi:** {prop['description']}")
+                
+                # Tombol hapus dengan Key unik berdasarkan ID properti
+                if st.button("❌ Hapus Listing Ini", key=f"del_{prop['id']}"):
+                    try:
+                        # Hapus foto-fotonya dulu, baru hapus propertinya
+                        supabase.table("property_images").delete().eq("property_id", prop['id']).execute()
+                        supabase.table("properties").delete().eq("id", prop['id']).execute()
+                        st.success("Listing berhasil dihapus!")
+                        st.rerun() # Refresh halaman agar data yang dihapus hilang dari layar
+                    except Exception as e:
+                        st.error(f"Gagal menghapus: {e}")
+    else:
+        st.info("Anda belum memiliki listing properti.")
